@@ -26,9 +26,14 @@ This allows all private network IPs (10.x, 172.x, 192.168.x). For better securit
 
 ## Pull the Docker Image
 
-While it is possible to build the image locally from the included Dockerfile, it is recommended to install and update by pulling the official image directly from Docker Hub. To pull the image manually without running the container, run:
+This fork publishes multi-arch images to GHCR on every `main` push and on `v*` tags:
 
-`docker pull seangreenhalgh/nanit`
+```bash
+docker pull ghcr.io/jville-family/nanit:latest
+# or a commit tag: ghcr.io/jville-family/nanit:sha-<shortsha>
+```
+
+Upstream Docker Hub images remain available as `seangreenhalgh/nanit` if you are tracking that project instead.
 
 ## Authentication
 
@@ -280,6 +285,13 @@ mqtt:
 | `NANIT_NOTIFICATIONS_MAX_BACKOFF` | `300` | Max backoff on errors in seconds |
 | `NANIT_NOTIFICATIONS_MESSAGE_TIMEOUT` | `300` | Max age of messages to process in seconds |
 | `NANIT_EVENTS_POLLING` | `false` | Enable legacy event message polling |
+
+## CI and dependency updates
+
+- GitHub Actions workflow [`.github/workflows/ghcr.yml`](.github/workflows/ghcr.yml) builds `linux/amd64` and `linux/arm64` and pushes to `ghcr.io/jville-family/nanit`.
+- [Mend Renovate](https://github.com/apps/renovate) keeps Go modules, Dockerfile bases, and GitHub Actions digests current via [`renovate.json`](renovate.json) (`config:best-practices`, `forkProcessing: enabled` because this repo is a fork).
+
+**Org setup (one-time):** install the [Renovate GitHub App](https://github.com/apps/renovate) on the `jville-family` org and enable `home_assistant_nanit`. With `renovate.json` already in the repo, merge any onboarding PR Renovate opens (or close it if it only duplicates the committed config).
 
 ## Credits
 
