@@ -312,7 +312,7 @@ func (c *NanitClient) FetchAuthorized(req *http.Request, data interface{}) error
 
 		token := c.SessionStore.GetAuthToken()
 		if token != "" {
-			req.Header.Set("Authorization", token)
+			req.Header.Set("Authorization", "Bearer "+token)
 
 			res, err := myClient.Do(req)
 			if err != nil {
@@ -365,7 +365,7 @@ func (c *NanitClient) TryFetchAuthorized(req *http.Request, data interface{}) er
 
 		token := c.SessionStore.GetAuthToken()
 		if token != "" {
-			req.Header.Set("Authorization", token)
+			req.Header.Set("Authorization", "Bearer "+token)
 
 			res, err := myClient.Do(req)
 			if err != nil {

@@ -34,10 +34,10 @@ type StallConfig struct {
 type PersistentBroadcaster struct {
 	babyUID string
 
-	mu           sync.RWMutex
-	subscribers  map[*Subscription]struct{}
-	headerPkts   []av.Packet
-	closed       bool
+	mu          sync.RWMutex
+	subscribers map[*Subscription]struct{}
+	headerPkts  []av.Packet
+	closed      bool
 
 	// Timestamp remapping state
 	tsMu            sync.Mutex
@@ -47,25 +47,26 @@ type PersistentBroadcaster struct {
 	initialized     bool
 
 	// Active source filtering (for hot standby)
-	activeSourceID    int  // Only forward packets from this source (0 = accept all)
-	activeSourceSet   bool // Whether active source filtering is enabled
+	activeSourceID  int  // Only forward packets from this source (0 = accept all)
+	activeSourceSet bool // Whether active source filtering is enabled
 
 	// Keyframe-aligned switching
-	pendingSourceID      int  // Source we want to switch to (waiting for keyframe)
-	pendingSourceSwitch  bool // Whether we're waiting for a keyframe from pendingSourceID
-	keyframeReceived     bool // Whether we've received a keyframe from current active source
+	pendingSourceID       int  // Source we want to switch to (waiting for keyframe)
+	pendingSourceSwitch   bool // Whether we're waiting for a keyframe from pendingSourceID
+	keyframeReceived      bool // Whether we've received a keyframe from current active source
 	pendingHeadersCleared bool // Whether we've cleared headers for the pending source switch
 
 	// Diagnostic tracking
 	lastPacketWallTime time.Time
+	lastLocalMediaAt   time.Time // wall time of the last local-camera media packet
 	droppedPackets     int64
 
 	// Stall detection
-	stallMu          sync.Mutex     // Serializes stall checker start/stop operations
-	stallConfig      *StallConfig
-	stallDetected    bool // true if we've already called callback for current stall
-	stallCheckStop   chan struct{}
-	stallCheckWg     sync.WaitGroup
+	stallMu        sync.Mutex // Serializes stall checker start/stop operations
+	stallConfig    *StallConfig
+	stallDetected  bool // true if we've already called callback for current stall
+	stallCheckStop chan struct{}
+	stallCheckWg   sync.WaitGroup
 }
 
 // Subscription represents a subscriber to the broadcaster
@@ -294,6 +295,12 @@ func (pb *PersistentBroadcaster) Broadcast(pkt av.Packet, sourceID int) {
 
 	// Check source filtering and handle keyframe-aligned switching
 	pb.tsMu.Lock()
+
+	// Track local camera media even when remote is the forwarded source.
+	// Header packets (type > 2) are not media and return before this point.
+	if sourceID == SourceIDLocal {
+		pb.lastLocalMediaAt = time.Now()
+	}
 
 	// Check for pending source switch - if this is a keyframe from the pending source, complete the switch
 	if pb.pendingSourceSwitch && sourceID == pb.pendingSourceID && pkt.IsKeyFrame {
@@ -552,6 +559,15 @@ func (pb *PersistentBroadcaster) GetBroadcastFunc(sourceID int) func(pkt av.Pack
 	return func(pkt av.Packet) {
 		pb.Broadcast(pkt, sourceID)
 	}
+}
+
+// LastLocalMediaAt returns the wall time of the last media packet from the
+// local camera source. The zero time means no local media has arrived.
+// Remote relay packets do not update this clock.
+func (pb *PersistentBroadcaster) LastLocalMediaAt() time.Time {
+	pb.tsMu.Lock()
+	defer pb.tsMu.Unlock()
+	return pb.lastLocalMediaAt
 }
 
 // ActiveSourceID returns the current active source ID, or 0 if not set

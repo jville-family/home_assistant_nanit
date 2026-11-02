@@ -108,7 +108,7 @@ func TestTryFetchAuthorized_ReturnsErrorOnInvalidJSON(t *testing.T) {
 func TestTryFetchAuthorized_SuccessOnValidResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify auth header is set
-		if r.Header.Get("Authorization") != "test-auth-token" {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
 			t.Errorf("Expected Authorization header to be set")
 		}
 		w.WriteHeader(http.StatusOK)
@@ -833,8 +833,8 @@ func TestFetchAuthorizedUsesStoreGetter(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify the Authorization header contains the token
 		authHeader := r.Header.Get("Authorization")
-		if authHeader != "getter-token" {
-			t.Errorf("Authorization header = %q, want getter-token", authHeader)
+		if authHeader != "Bearer getter-token" {
+			t.Errorf("Authorization header = %q, want Bearer getter-token", authHeader)
 		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

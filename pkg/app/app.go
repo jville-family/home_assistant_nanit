@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/scgreenhalgh/home_assistant_nanit/pkg/baby"
 	"github.com/scgreenhalgh/home_assistant_nanit/pkg/client"
 	"github.com/scgreenhalgh/home_assistant_nanit/pkg/message"
@@ -15,7 +17,6 @@ import (
 	"github.com/scgreenhalgh/home_assistant_nanit/pkg/session"
 	"github.com/scgreenhalgh/home_assistant_nanit/pkg/stream"
 	"github.com/scgreenhalgh/home_assistant_nanit/pkg/utils"
-	"github.com/rs/zerolog/log"
 )
 
 // App - application container
@@ -32,6 +33,9 @@ type App struct {
 	// Stream managers per baby (for failover support)
 	streamManagersMu sync.RWMutex
 	streamManagers   map[string]*stream.StreamManager
+
+	// localHealth reports whether each baby has a local RTMP publisher with recent media.
+	localHealth *stream.LocalHealthRegistry
 
 	// Notification manager for event polling
 	notificationManager *notification.Manager
@@ -81,6 +85,7 @@ func (app *App) Run(ctx utils.GracefulContext) {
 
 	// RTMP
 	if app.Opts.RTMP != nil {
+		app.localHealth = stream.NewLocalHealthRegistry()
 		// Use new secure server if any security options are configured
 		if app.Opts.RTMP.AllowedIPs != "" || app.Opts.RTMP.AllowedPresets != "" {
 			serverCfg := rtmpserver.ServerConfig{
@@ -139,7 +144,11 @@ func (app *App) Run(ctx utils.GracefulContext) {
 
 	// Start serving content over HTTP
 	if app.Opts.HTTPEnabled {
-		go serve(app.SessionStore.Session.Babies, app.Opts.DataDirectories, app.Opts.HTTPTLSConfig)
+		var health http.Handler
+		if app.localHealth != nil {
+			health = app.localHealth
+		}
+		go serve(app.SessionStore.Session.Babies, app.Opts.DataDirectories, app.Opts.HTTPTLSConfig, health)
 	}
 
 	<-ctx.Done()
@@ -304,6 +313,7 @@ func (app *App) createStreamManager(babyUID string, conn *client.WebsocketConnec
 		RTMPServer:     app.rtmpServer,
 		StallThreshold: 3 * time.Second, // Switch to remote if no packets for 3s
 		OnAuthFailed:   app.onAuthFailed,
+		Health:         app.localHealth,
 	})
 
 	// Create a no-op remote relay since HybridStreamPool manages its own remote connection

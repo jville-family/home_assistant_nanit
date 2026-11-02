@@ -508,13 +508,42 @@ func TestPersistentBroadcaster_ConcurrentSetStallConfig(t *testing.T) {
 			// This should not panic even when called concurrently
 			pb.SetStallConfig(&StallConfig{
 				Threshold: time.Duration(100+i) * time.Millisecond,
-				Callback: func(sourceID int) {},
+				Callback:  func(sourceID int) {},
 			})
 		}(i)
 	}
 
 	wg.Wait()
 	// If we get here without panic, the test passes
+}
+
+func TestPersistentBroadcaster_LastLocalMediaIgnoresRemoteAndHeaders(t *testing.T) {
+	pb := NewPersistentBroadcaster("baby123")
+	defer pb.Close()
+
+	pb.SetActiveSource(21)
+
+	pb.Broadcast(av.Packet{Type: 9, Data: []byte{0x01}}, SourceIDLocal)
+	assert.True(t, pb.LastLocalMediaAt().IsZero(), "header packets are not local media")
+
+	before := time.Now()
+	pb.Broadcast(av.Packet{
+		Type:       1,
+		IsKeyFrame: true,
+		Time:       time.Millisecond,
+		Data:       []byte{0x02},
+	}, 21)
+	assert.True(t, pb.LastLocalMediaAt().IsZero(), "remote packets are not local media")
+
+	pb.Broadcast(av.Packet{
+		Type:       1,
+		IsKeyFrame: true,
+		Time:       2 * time.Millisecond,
+		Data:       []byte{0x03},
+	}, SourceIDLocal)
+
+	got := pb.LastLocalMediaAt()
+	assert.False(t, got.Before(before), "local media timestamp should be recorded while remote is the active source")
 }
 
 func TestPersistentBroadcaster_ConcurrentUnsubscribeAndClose(t *testing.T) {

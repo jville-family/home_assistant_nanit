@@ -50,9 +50,15 @@ type rtmpHandler struct {
 	publisherWaitCh map[string]chan struct{}
 
 	// Track active local publishers count to detect reconnections vs drops
-	localPublishersMu sync.RWMutex
-	localPublishers   map[string]int // count of active publishers per baby
+	localPublishersMu  sync.RWMutex
+	localPublishers    map[string]int // count of active publishers per baby
+	publisherListeners []LocalPublisherFunc
 }
+
+// LocalPublisherFunc is called after a local publisher connects or disconnects.
+// publisherCount is the number of publishers still registered for babyUID.
+// The callback runs on the RTMP connection goroutine and must not block.
+type LocalPublisherFunc func(babyUID string, publisherCount int)
 
 // StartRTMPServer - Blocking server (legacy, starts in background and returns RTMPServer for access)
 // Deprecated: Use NewServer with ServerConfig for new code
@@ -206,6 +212,40 @@ func (srv *RTMPServer) getOrCreatePersistentBroadcaster(babyUID string) *Persist
 	srv.handler.broadcastersByUID[babyUID] = pb
 	log.Info().Str("baby_uid", babyUID).Msg("Created persistent broadcaster")
 	return pb
+}
+
+// AddLocalPublisherListener registers fn for local publisher connect and disconnect.
+// Callbacks run on the RTMP connection goroutine and must not block.
+func (srv *RTMPServer) AddLocalPublisherListener(fn LocalPublisherFunc) {
+	if srv == nil || srv.handler == nil || fn == nil {
+		return
+	}
+	srv.handler.localPublishersMu.Lock()
+	srv.handler.publisherListeners = append(srv.handler.publisherListeners, fn)
+	srv.handler.localPublishersMu.Unlock()
+}
+
+// LocalPublisherCount returns how many local publishers are registered for babyUID.
+func (srv *RTMPServer) LocalPublisherCount(babyUID string) int {
+	if srv == nil || srv.handler == nil {
+		return 0
+	}
+	srv.handler.localPublishersMu.RLock()
+	defer srv.handler.localPublishersMu.RUnlock()
+	return srv.handler.localPublishers[babyUID]
+}
+
+// LastLocalMediaAt returns the wall time of the last local-camera media packet.
+// The zero time means the broadcaster has not received local media.
+func (srv *RTMPServer) LastLocalMediaAt(babyUID string) time.Time {
+	if srv == nil {
+		return time.Time{}
+	}
+	pb := srv.GetBroadcaster(babyUID)
+	if pb == nil {
+		return time.Time{}
+	}
+	return pb.LastLocalMediaAt()
 }
 
 // GetBroadcaster returns the PersistentBroadcaster for a baby, or nil if none exists
@@ -443,15 +483,20 @@ func (s *rtmpHandler) registerLocalPublisher(babyUID, slotSuffix, streamKey stri
 	}
 	s.broadcastersMu.Unlock()
 
-	// Increment local publisher count (by babyUID for backward compatibility)
+	// Increment local publisher count (by babyUID for backward compatibility).
+	// When there is no slot suffix, streamKey equals babyUID. Counting both
+	// would make one publisher look like two, and the last disconnect would
+	// still report a remaining publisher.
 	s.localPublishersMu.Lock()
 	s.localPublishers[babyUID]++
 	count := s.localPublishers[babyUID]
-	// Also track by streamKey for pool-aware lookups
-	s.localPublishers[streamKey]++
+	if streamKey != babyUID {
+		s.localPublishers[streamKey]++
+	}
 	s.localPublishersMu.Unlock()
 
 	log.Info().Str("baby_uid", babyUID).Str("stream_key", streamKey).Int("active_count", count).Msg("Local publisher registered")
+	s.notifyLocalPublishers(babyUID)
 
 	// Determine source ID based on slot suffix
 	sourceID := SourceIDLocal // Default for legacy single-stream
@@ -473,15 +518,29 @@ func (s *rtmpHandler) unregisterLocalPublisher(babyUID, streamKey string) int {
 		delete(s.localPublishers, babyUID)
 		remaining = 0
 	}
-	// Also decrement streamKey count
-	s.localPublishers[streamKey]--
-	if s.localPublishers[streamKey] <= 0 {
-		delete(s.localPublishers, streamKey)
+	if streamKey != babyUID {
+		s.localPublishers[streamKey]--
+		if s.localPublishers[streamKey] <= 0 {
+			delete(s.localPublishers, streamKey)
+		}
 	}
 	s.localPublishersMu.Unlock()
 
 	log.Info().Str("baby_uid", babyUID).Str("stream_key", streamKey).Int("remaining_count", remaining).Msg("Local publisher unregistered")
+	s.notifyLocalPublishers(babyUID)
 	return remaining
+}
+
+func (s *rtmpHandler) notifyLocalPublishers(babyUID string) {
+	s.localPublishersMu.RLock()
+	count := s.localPublishers[babyUID]
+	listeners := make([]LocalPublisherFunc, len(s.publisherListeners))
+	copy(listeners, s.publisherListeners)
+	s.localPublishersMu.RUnlock()
+
+	for _, fn := range listeners {
+		fn(babyUID, count)
+	}
 }
 
 // getNewSubscriber creates a subscription to the PersistentBroadcaster

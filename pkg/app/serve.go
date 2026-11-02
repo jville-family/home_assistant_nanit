@@ -117,11 +117,17 @@ func createLogHandler(dirs DataDirectories) http.HandlerFunc {
 	}
 }
 
-func serve(babies []baby.Baby, dataDir DataDirectories, tlsConfig ServerTLSConfig) {
+func serve(babies []baby.Baby, dataDir DataDirectories, tlsConfig ServerTLSConfig, health http.Handler) {
 	const port = 8080
 
 	// Index handler
 	http.HandleFunc("/", createIndexHandler(babies))
+
+	// Local RTMP health. 200 only when every baby has a publisher with recent media.
+	// This is a readiness signal. Restarting the process is not required to recover.
+	if health != nil {
+		http.Handle("/health/local-rtmp", health)
+	}
 
 	// Video files
 	http.Handle("/video/", http.StripPrefix("/video/", http.FileServer(http.Dir(dataDir.VideoDir))))

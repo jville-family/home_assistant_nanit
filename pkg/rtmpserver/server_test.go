@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scgreenhalgh/home_assistant_nanit/pkg/baby"
 	"github.com/notedit/rtmp/av"
+	"github.com/scgreenhalgh/home_assistant_nanit/pkg/baby"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -357,4 +357,44 @@ func TestWaitForPublisher_SucceedsWhenPublisherConnectsDuringWait(t *testing.T) 
 	assert.NoError(t, err)
 	assert.True(t, elapsed < 200*time.Millisecond, "Should return when publisher connects (elapsed: %v)", elapsed)
 	assert.True(t, elapsed > 40*time.Millisecond, "Should wait until publisher connects (elapsed: %v)", elapsed)
+}
+
+func TestLocalPublisherListenerSeesConnectAndDrop(t *testing.T) {
+	stateManager := baby.NewStateManager()
+	server := NewRTMPServer(stateManager)
+
+	var counts []int
+	server.AddLocalPublisherListener(func(babyUID string, publisherCount int) {
+		if babyUID == "baby123" {
+			counts = append(counts, publisherCount)
+		}
+	})
+
+	server.handler.registerLocalPublisher("baby123", "", "baby123")
+	server.handler.unregisterLocalPublisher("baby123", "baby123")
+
+	assert.Equal(t, []int{1, 0}, counts)
+	assert.Equal(t, 0, server.LocalPublisherCount("baby123"))
+}
+
+func TestPublisherCountOneConnectionIsOne(t *testing.T) {
+	stateManager := baby.NewStateManager()
+	handler := newRtmpHandler(stateManager)
+
+	handler.registerLocalPublisher("baby123", "", "baby123")
+	assert.Equal(t, 1, handler.localPublishers["baby123"])
+
+	remaining := handler.unregisterLocalPublisher("baby123", "baby123")
+	assert.Equal(t, 0, remaining)
+	assert.Equal(t, 0, handler.localPublishers["baby123"])
+
+	handler.registerLocalPublisher("baby123", "_0", "baby123_0")
+	handler.registerLocalPublisher("baby123", "_1", "baby123_1")
+	assert.Equal(t, 2, handler.localPublishers["baby123"])
+	assert.Equal(t, 1, handler.localPublishers["baby123_0"])
+
+	remaining = handler.unregisterLocalPublisher("baby123", "baby123_0")
+	assert.Equal(t, 1, remaining)
+	assert.Equal(t, 0, handler.localPublishers["baby123_0"])
+	assert.Equal(t, 1, handler.localPublishers["baby123"])
 }

@@ -54,7 +54,7 @@ GET https://api.nanit.com/babies/{baby_uid}/events?limit={limit}
 ```
 
 **Headers:**
-- `Authorization: {auth_token}`
+- `Authorization: Bearer {auth_token}`
 - `Content-Type: application/json`
 
 ## Event Types

@@ -27,9 +27,9 @@ and 1 for users (`wss://api.nanit.com/focus/cameras/{camera_uid}/user_connect`).
 
 There seems to be quite mess in request authorization. Probably caused by API being backed by multiple microservices.
 
-The `api.nanit.com` server expects `Authorization: {token}` header.
+REST calls to `api.nanit.com` send `Authorization: Bearer {token}`. `/stats/latest` and `/summary` reject a raw token (`Authorization: {token}` returns 401 `{"message":"not authorized"}`). `/babies`, `/events`, and `/messages` still accept Bearer.
 
-The `api.nanit.com/focus/*` endpoints expects `Authorization: Bearer {token}`.
+The `api.nanit.com/focus/*` endpoints expect `Authorization: Bearer {token}`.
 
 The local websocket can be authorized using _User Camera_ token with `Authorization: token {uc_token}`. It can be retrieved from `api.nanit.com/focus/cameras/{camera_uid}/uc_token`. It has longer expiration date so I expect that mobile clients are periodically renewing it so that it is ready for the time they might be offline.
 
@@ -40,6 +40,10 @@ The local websocket can be authorized using _User Camera_ token with `Authorizat
 Remote streaming is possible through Nanit servers on URL: `rtmps://media-secured.nanit.com/nanit/{baby_uid}.{auth_token}`.
 
 Local streaming seems to be only happening outbound. Meaning you inform cam with the URL (through PUT_STREAMING message) and it starts pushing to that URL a RTMP stream. You can use ie. [nginx-rtmp](https://docs.nginx.com/nginx/admin-guide/dynamic-modules/rtmp/) to accept that stream and restream it however you need (as your own RTMP stream, HLS stream, ...).
+
+The restreamer keeps that publish up after the process is already running. Local RTMP counts as healthy only when a publisher is registered for `/local/{baby_uid}` and has sent media within the last 5 seconds. MQTT `is_stream_alive` is the publisher TCP flag (and can stay true on a silent socket or a retained message). `stream_source=Local` is the preferred forward path, not proof of packets. `camera_online` comes from notification events.
+
+If the publisher disappears, or a registered publisher sends no local media for 15 seconds, the restreamer sends `PUT_STREAMING` again on the existing camera websocket. It does not open another websocket. Retries back off from 20 seconds to 90 seconds with jitter, or about 3 minutes when the camera reports its mobile connection limit. Remote relay is standby only. The same condition is logged as `Local RTMP starved` / `Local RTMP healthy`, and `GET /health/local-rtmp` returns 200 only while every baby has recent local media. Use that as readiness, not as a liveness restart.
 
 ## Getting logs
 

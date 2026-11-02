@@ -19,8 +19,20 @@ These sensors are updated in real-time via the WebSocket connection to the camer
 These sensors track the streaming state:
 
 - `nanit/babies/{baby_uid}/stream_url` - Current RTMP stream URL (string)
-- `nanit/babies/{baby_uid}/stream_source` - Stream source: "local", "remote", or "none" (string)
-- `nanit/babies/{baby_uid}/is_stream_alive` - Whether a stream is currently active (bool)
+- `nanit/babies/{baby_uid}/stream_source` - Which path the restreamer is forwarding: "Local", "Remote", or "None" (string)
+- `nanit/babies/{baby_uid}/is_stream_alive` - Publisher TCP registration, not recent media (bool). See below.
+
+### Local RTMP health vs MQTT
+
+`is_stream_alive`, `stream_source`, and `camera_online` do not mean go2rtc can read `/local/{baby_uid}`.
+
+- `is_stream_alive` follows RTMP publisher registration. It becomes true when a publisher connects and false when the last publisher for that baby unregisters. A socket that is still registered but has stopped sending media stays true. The MQTT message is retained, so a missed update also leaves the previous value in place.
+- `stream_source=Local` means the restreamer prefers the camera's LAN publish. It can stay `Local` while that publish is empty, including when remote standby never came up.
+- `camera_online` is a Nanit notification event. It is unrelated to the RTMP publish.
+
+Local RTMP health is a separate signal. It is true only when `/local/{baby_uid}` has a publisher and that publisher has sent media within the last 5 seconds. The process logs `Local RTMP healthy` when that becomes true and `Local RTMP starved` when the publish has been missing for 15 seconds. `GET /health/local-rtmp` on the HTTP server returns 200 only when every baby meets that bar, and 503 otherwise.
+
+That HTTP endpoint is a readiness signal. Do not use it as a liveness probe that restarts the process. When local media is missing, the restreamer re-sends `PUT_STREAMING` on the existing camera websocket (the same request used at startup) so the camera republishes to `/local/{baby_uid}`. A publisher disconnect is re-requested immediately. A registered publisher that sends no media is re-requested after 15 seconds. Further attempts back off from 20 seconds to 90 seconds with jitter. If the camera reports that its mobile connection limit is full, the backoff is about 3 minutes. Remote cloud relay stays a standby and does not clear a local starve.
 
 ### Notification Event Sensors
 
