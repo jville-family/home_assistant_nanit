@@ -1,5 +1,5 @@
 
-FROM --platform=$BUILDPLATFORM golang:1.24.11 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ADD cmd /app/cmd
 ADD pkg /app/pkg
 ADD go.mod /app/
